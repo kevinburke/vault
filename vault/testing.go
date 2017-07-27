@@ -29,6 +29,7 @@ import (
 	"github.com/hashicorp/vault/api"
 	"github.com/hashicorp/vault/audit"
 	"github.com/hashicorp/vault/helper/logformat"
+	"github.com/hashicorp/vault/helper/reload"
 	"github.com/hashicorp/vault/helper/salt"
 	"github.com/hashicorp/vault/logical"
 	"github.com/hashicorp/vault/logical/framework"
@@ -590,7 +591,9 @@ func TestWaitActive(t testing.TB, core *Core) {
 }
 
 type TestCluster struct {
-	Cores []*TestClusterCore
+	Cores           []*TestClusterCore
+	ReloadFuncs     []*map[string][]reload.ReloadFunc
+	ReloadFuncsLock []*sync.RWMutex
 }
 
 func (t *TestCluster) StartListeners() {
@@ -635,6 +638,11 @@ type TestClusterCore struct {
 }
 
 func NewTestCluster(t testing.TB, base *CoreConfig, unsealStandbys bool) *TestCluster {
+	testCluster := &TestCluster{
+		ReloadFuncs:     make([]*map[string][]ReloadFunc, 0, 3),
+		ReloadFuncsLock: make([]*sync.RWMutex, 0, 3),
+	}
+
 	//
 	// TLS setup
 	//
@@ -784,9 +792,23 @@ func NewTestCluster(t testing.TB, base *CoreConfig, unsealStandbys bool) *TestCl
 		RedirectAddr:       fmt.Sprintf("https://127.0.0.1:%d", c1lns[0].Address.Port),
 		ClusterAddr:        fmt.Sprintf("https://127.0.0.1:%d", c1lns[0].Address.Port+100),
 		DisableMlock:       true,
+		EnableUI:           true,
 	}
 
 	if base != nil {
+		coreConfig.DisableCache = base.DisableCache
+		coreConfig.EnableUI = base.EnableUI
+		coreConfig.DefaultLeaseTTL = base.DefaultLeaseTTL
+		coreConfig.MaxLeaseTTL = base.MaxLeaseTTL
+		coreConfig.CacheSize = base.CacheSize
+		coreConfig.PluginDirectory = base.PluginDirectory
+		coreConfig.Seal = base.Seal
+		coreConfig.DevToken = base.DevToken
+
+		if !coreConfig.DisableMlock {
+			base.DisableMlock = false
+		}
+
 		if base.Physical != nil {
 			coreConfig.Physical = base.Physical
 		}
@@ -835,6 +857,8 @@ func NewTestCluster(t testing.TB, base *CoreConfig, unsealStandbys bool) *TestCl
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
+	testCluster.ReloadFuncs = append(testCluster.ReloadFuncs, c1.reloadFuncs)
+	testCluster.ReloadFuncsLock = append(testCluster.ReloadFuncsLock, c1.reloadFuncsLock)
 
 	coreConfig.RedirectAddr = fmt.Sprintf("https://127.0.0.1:%d", c2lns[0].Address.Port)
 	if coreConfig.ClusterAddr != "" {
@@ -844,6 +868,8 @@ func NewTestCluster(t testing.TB, base *CoreConfig, unsealStandbys bool) *TestCl
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
+	testCluster.ReloadFuncs = append(testCluster.ReloadFuncs, c2.reloadFuncs)
+	testCluster.ReloadFuncsLock = append(testCluster.ReloadFuncsLock, c2.reloadFuncsLock)
 
 	coreConfig.RedirectAddr = fmt.Sprintf("https://127.0.0.1:%d", c3lns[0].Address.Port)
 	if coreConfig.ClusterAddr != "" {
@@ -853,6 +879,8 @@ func NewTestCluster(t testing.TB, base *CoreConfig, unsealStandbys bool) *TestCl
 	if err != nil {
 		t.Fatalf("err: %v", err)
 	}
+	testCluster.ReloadFuncs = append(testCluster.ReloadFuncs, c3.reloadFuncs)
+	testCluster.ReloadFuncsLock = append(testCluster.ReloadFuncsLock, c3.reloadFuncsLock)
 
 	//
 	// Clustering setup
@@ -994,7 +1022,8 @@ func NewTestCluster(t testing.TB, base *CoreConfig, unsealStandbys bool) *TestCl
 		Client:      getAPIClient(c3lns[0].Address.Port),
 	})
 
-	return &TestCluster{Cores: ret}
+	testCluster.Cores = ret
+	return testCluster
 }
 
 const (

@@ -11,12 +11,12 @@ import (
 	"sync"
 
 	"github.com/hashicorp/vault/helper/parseutil"
+	"github.com/hashicorp/vault/helper/reload"
 	"github.com/hashicorp/vault/helper/tlsutil"
-	"github.com/hashicorp/vault/vault"
 )
 
 // ListenerFactory is the factory function to create a listener.
-type ListenerFactory func(map[string]interface{}, io.Writer) (net.Listener, map[string]string, vault.ReloadFunc, error)
+type ListenerFactory func(map[string]interface{}, io.Writer) (net.Listener, map[string]string, reload.ReloadFunc, error)
 
 // BuiltinListeners is the list of built-in listener types.
 var BuiltinListeners = map[string]ListenerFactory{
@@ -25,7 +25,7 @@ var BuiltinListeners = map[string]ListenerFactory{
 
 // NewListener creates a new listener of the given type with the given
 // configuration. The type is looked up in the BuiltinListeners map.
-func NewListener(t string, config map[string]interface{}, logger io.Writer) (net.Listener, map[string]string, vault.ReloadFunc, error) {
+func NewListener(t string, config map[string]interface{}, logger io.Writer) (net.Listener, map[string]string, reload.ReloadFunc, error) {
 	f, ok := BuiltinListeners[t]
 	if !ok {
 		return nil, nil, nil, fmt.Errorf("unknown listener type: %s", t)
@@ -37,7 +37,7 @@ func NewListener(t string, config map[string]interface{}, logger io.Writer) (net
 func listenerWrapTLS(
 	ln net.Listener,
 	props map[string]string,
-	config map[string]interface{}) (net.Listener, map[string]string, vault.ReloadFunc, error) {
+	config map[string]interface{}) (net.Listener, map[string]string, reload.ReloadFunc, error) {
 	props["tls"] = "disabled"
 
 	if v, ok := config["tls_disable"]; ok {
